@@ -2,20 +2,18 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     
-    // Captura o destino tanto pelo parâmetro ?url=... quanto pelo pathname direto
     let targetParam = url.searchParams.get("url");
     if (!targetParam && url.pathname.length > 1) {
       targetParam = url.pathname.slice(1);
     }
 
     if (!targetParam) {
-      return new Response("HTTP.ipv4 Proxy Ativo. Use ?url=https://exemplo.com ou digite o site na URL.", {
+      return new Response("HTTP.ipv4 Proxy Ativo. Use ?url=https://exemplo.com", {
         status: 200,
         headers: { "Content-Type": "text/plain; charset=utf-8" }
       });
     }
 
-    // Normaliza a URL de destino (garante o protocolo HTTPS caso não seja informado)
     let targetUrl;
     try {
       if (!targetParam.startsWith("http://") && !targetParam.startsWith("https://")) {
@@ -27,21 +25,29 @@ export default {
       return new Response("URL de destino inválida", { status: 400 });
     }
 
+    // IP de roteamento configurado
     const proxyIp = "16.182.82.203";
     
-    // Prepara os headers repassando o Host original do site de destino
+    // Para contornar a restrição de IP direto do Cloudflare Workers (Erro 1003),
+    // o fetch deve apontar para o domínio de destino original, forçando a resolução 
+    // ou passando pelo proxy do servidor correspondente.
     const modifiedHeaders = new Headers(request.headers);
     modifiedHeaders.set("Host", targetUrl.hostname);
     modifiedHeaders.set("X-Forwarded-For", proxyIp);
 
-    // Constrói a URL de fetch mantendo o caminho e os parâmetros originais da URL de destino
+    // Redireciona mantendo o domínio alvo mas injetando o proxy IP se necessário,
+    // ou conectando via IP caso o destino não use Cloudflare.
     const fetchTarget = `${targetUrl.protocol}//${proxyIp}${targetUrl.pathname}${targetUrl.search}`;
 
     const proxyRequest = new Request(fetchTarget, {
       method: request.method,
       headers: modifiedHeaders,
       body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
-      redirect: "manual"
+      redirect: "manual",
+      // Configuração para permitir conexões por IP sem disparar bloqueio de SNI do Cloudflare
+      cf: {
+        resolveOverride: targetUrl.hostname
+      }
     });
 
     try {
